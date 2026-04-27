@@ -1,0 +1,378 @@
+<style>
+  .domain-scanner-container {
+    max-width: 800px;
+    margin: 0 auto;
+    font-family: Arial, sans-serif;
+  }
+  .domain-scanner-card {
+    background-color: #121212;
+    color: white;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+  .scanner-heading {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    text-align: center;
+  }
+  .ip-address {
+    text-align: center;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    color: #888;
+  }
+  .input-group {
+    display: flex;
+    margin-bottom: 1rem;
+  }
+  .domain-input {
+    flex-grow: 1;
+    padding: 0.5rem;
+    font-size: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 4px 0 0 4px;
+    background-color: #ffffff;
+    color: #000000;
+  }
+  .domain-input::placeholder {
+    color: #666;
+  }
+  .scan-button {
+    background-color: #7074fc;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    font-size: 1rem;
+    cursor: pointer;
+    border-radius: 0 4px 4px 0;
+  }
+  .scan-button:hover {
+    background-color: #5c60e6;
+  }
+  .scan-button:disabled {
+    background-color: #9b9df5;
+    cursor: not-allowed;
+  }
+  .loading-indicator {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 1rem;
+  }
+  .spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #7074fc;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    animation: spin 1s linear infinite;
+    margin-right: 1rem;
+  }
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .error-message {
+    color: #ff6b6b;
+    margin-top: 1rem;
+    text-align: center;
+  }
+  .results-container {
+    margin-top: 2rem;
+  }
+  .results-heading {
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+  }
+  .results-grid {
+    display: grid;
+    gap: 1rem;
+  }
+  .result-item {
+    background-color: #1e1e1e;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+  }
+  .result-header {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+    font-weight: bold;
+  }
+  .result-header.configured {
+    background-color: #4caf50;
+  }
+  .result-header.not-configured {
+    background-color: #f44336;
+  }
+  .result-details {
+    padding: 1rem;
+    font-size: 0.9rem;
+  }
+  .result-explanation {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: #aaa;
+  }
+  .debug-info {
+    margin-top: 1rem;
+    font-size: 0.8rem;
+    color: #888;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .score-container {
+    text-align: center;
+    margin-top: 1rem;
+    font-size: 1.2rem;
+    font-weight: bold;
+  }
+</style>
+
+<div class="domain-scanner-container">
+  <div class="domain-scanner-card">
+    <h2 class="scanner-heading">Meta Eagle Email Security Tool</h2>
+    <div id="ip-address" class="ip-address">Loading your IP address...</div>
+    <div class="input-group">
+      <input type="text" id="domain-input" class="domain-input" placeholder="Enter your domain name">
+      <button id="scan-button" class="scan-button">Check Now</button>
+    </div>
+    <div id="loading-indicator" class="loading-indicator" style="display: none;">
+      <div class="spinner"></div>
+      <p>Checking your domain...</p>
+    </div>
+    <div id="error-message" class="error-message" style="display: none;"></div>
+    <div id="results" class="results-container" style="display: none;">
+      <h3 class="results-heading">Security Check Results</h3>
+      <div id="score-container" class="score-container"></div>
+      <div class="results-grid">
+        <!-- Results will be inserted here by JavaScript -->
+      </div>
+    </div>
+    <div id="debug-info" class="debug-info" style="display: none;"></div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const domainInput = document.getElementById('domain-input');
+  const scanButton = document.getElementById('scan-button');
+  const loadingIndicator = document.getElementById('loading-indicator');
+  const errorMessage = document.getElementById('error-message');
+  const resultsContainer = document.getElementById('results');
+  const resultsGrid = resultsContainer.querySelector('.results-grid');
+  const ipAddressElement = document.getElementById('ip-address');
+  const debugInfo = document.getElementById('debug-info');
+  const scoreContainer = document.getElementById('score-container');
+
+  // Fetch and display the user's IP address
+  fetch('https://api.ipify.org?format=json')
+    .then(response => response.json())
+    .then(data => {
+      ipAddressElement.textContent = `Your IP Address: ${data.ip}`;
+    })
+    .catch(error => {
+      ipAddressElement.textContent = 'Unable to retrieve IP address';
+      console.error('IP fetch error:', error);
+    });
+
+  scanButton.addEventListener('click', async function() {
+    const domain = domainInput.value.trim();
+    if (!domain) {
+      showError('Please enter a domain name.');
+      return;
+    }
+
+    showLoading();
+    hideError();
+    hideResults();
+    hideDebugInfo();
+
+    try {
+      const [spfResult, dkimResult, dmarcResult] = await Promise.all([
+        checkSPF(domain),
+        checkDKIM(domain),
+        checkDMARC(domain)
+      ]);
+
+      resultsGrid.innerHTML = '';
+      resultsGrid.appendChild(spfResult);
+      resultsGrid.appendChild(dkimResult);
+      resultsGrid.appendChild(dmarcResult);
+
+      const score = calculateScore(spfResult, dkimResult, dmarcResult);
+      displayScore(score);
+
+      showResults();
+    } catch (error) {
+      console.error('Scan error:', error);
+      showError('An error occurred while scanning the domain. Please try again.');
+      showDebugInfo(`Error details: ${error.message}\n\nPlease check the browser console for more information.`);
+    } finally {
+      hideLoading();
+    }
+  });
+
+  async function checkSPF(domain) {
+    const data = await queryDNS(domain, 'TXT');
+    let isConfigured = false;
+    let recordDetails = 'No SPF record found';
+
+    const spfRecord = data.Answer ? data.Answer.find(record => record.data.startsWith('v=spf1')) : null;
+    if (spfRecord) {
+      isConfigured = true;
+      recordDetails = `SPF record found: ${spfRecord.data}`;
+    }
+
+    console.log('SPF check result:', { domain, isConfigured, recordDetails });
+    return createResultElement('SPF', isConfigured, recordDetails);
+  }
+
+  async function checkDKIM(domain) {
+    const selectors = ['default', 'google', 'dkim', 'k1', 's1', 's2', 'mail', 'selector1', 'selector2'];
+    let isConfigured = false;
+    let recordDetails = 'No DKIM record found';
+
+    for (const selector of selectors) {
+      const data = await queryDNS(`${selector}._domainkey.${domain}`, 'TXT');
+      if (data.Answer) {
+        for (const record of data.Answer) {
+          if (record.data.includes('v=DKIM1') || 
+              record.data.includes('k=rsa') || 
+              record.data.includes('p=') ||
+              record.data.includes('DKIM1')) {
+            isConfigured = true;
+            recordDetails = `DKIM record found for selector '${selector}': ${record.data}`;
+            console.log('DKIM check result:', { domain, isConfigured, recordDetails });
+            return createResultElement('DKIM', isConfigured, recordDetails);
+          }
+        }
+      }
+    }
+
+    for (const selector of selectors) {
+      const data = await queryDNS(`${selector}._domainkey.${domain}`, 'CNAME');
+      if (data.Answer) {
+        isConfigured = true;
+        recordDetails = `DKIM CNAME record found for selector '${selector}': ${data.Answer[0].data}`;
+        console.log('DKIM check result:', { domain, isConfigured, recordDetails });
+        return createResultElement('DKIM', isConfigured, recordDetails);
+      }
+    }
+
+    console.log('DKIM check result:', { domain, isConfigured, recordDetails });
+    return createResultElement('DKIM', isConfigured, recordDetails);
+  }
+
+  async function checkDMARC(domain) {
+    const data = await queryDNS(`_dmarc.${domain}`, 'TXT');
+    let isConfigured = false;
+    let recordDetails = 'No DMARC record found';
+
+    const dmarcRecord = data.Answer ? data.Answer.find(record => record.data.startsWith('v=DMARC1')) : null;
+    if (dmarcRecord) {
+      isConfigured = true;
+      recordDetails = `DMARC record found: ${dmarcRecord.data}`;
+    }
+
+    console.log('DMARC check result:', { domain, isConfigured, recordDetails });
+    return createResultElement('DMARC', isConfigured, recordDetails);
+  }
+
+  async function queryDNS(domain, type) {
+    const apiUrl = `https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=${type}`;
+    const response = await fetch(apiUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
+  }
+
+  function createResultElement(recordType, isConfigured, details) {
+    const resultItem = document.createElement('div');
+    resultItem.className = 'result-item';
+    let explanation = '';
+    
+    switch (recordType) {
+      case 'SPF':
+        explanation = 'SPF helps prevent email spoofing by specifying which servers are allowed to send emails on behalf of your domain. This protects your domain\'s reputation and reduces the chance of your emails being marked as spam.';
+        break;
+      case 'DKIM':
+        explanation = 'DKIM adds a digital signature to your emails, verifying that they haven\'t been tampered with during transit. This increases the trustworthiness of your emails and improves deliverability.';
+        break;
+      case 'DMARC':
+        explanation = 'DMARC builds on SPF and DKIM by telling receiving servers what to do with emails that fail authentication. It helps protect your domain from being used in phishing attacks and provides reporting on email authentication results.';
+        break;
+    }
+
+    resultItem.innerHTML = `
+      <div class="result-header ${isConfigured ? 'configured' : 'not-configured'}">
+        <span class="record-type">${recordType}</span>
+        <span class="status">${isConfigured ? 'PASS' : 'FAIL'}</span>
+      </div>
+      <div class="result-details">
+        ${details}
+        <div class="result-explanation">${explanation}</div>
+      </div>
+    `;
+    return resultItem;
+  }
+
+  function calculateScore(spfResult, dkimResult, dmarcResult) {
+    let score = 0;
+    if (spfResult.querySelector('.status').textContent === 'PASS') score += 3;
+    if (dkimResult.querySelector('.status').textContent === 'PASS') score += 3;
+    if (dmarcResult.querySelector('.status').textContent === 'PASS') score += 4;
+    return score;
+  }
+
+  function displayScore(score) {
+    let color;
+    if (score <= 3) color = '#f44336';
+    else if (score <= 6) color = '#ffa726';
+    else color = '#4caf50';
+
+    scoreContainer.innerHTML = `
+      <p>Email Security Score: <span style="color: ${color};">${score}/10</span></p>
+    `;
+  }
+
+  function showLoading() {
+    loadingIndicator.style.display = 'flex';
+    scanButton.disabled = true;
+  }
+
+  function hideLoading() {
+    loadingIndicator.style.display = 'none';
+    scanButton.disabled = false;
+  }
+
+  function showError(message) {
+    errorMessage.textContent = message;
+    errorMessage.style.display = 'block';
+  }
+
+  function hideError() {
+    errorMessage.style.display = 'none';
+  }
+
+  function showResults() {
+    resultsContainer.style.display = 'block';
+  }
+
+  function hideResults() {
+    resultsContainer.style.display = 'none';
+  }
+
+  function showDebugInfo(message) {
+    debugInfo.textContent = message;
+    debugInfo.style.display = 'block';
+  }
+
+  function hideDebugInfo() {
+    debugInfo.style.display = 'none';
+  }
+});
+</script>
